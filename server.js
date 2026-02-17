@@ -56,7 +56,7 @@ function extractVideoId(url) {
         /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
         /youtube\.com\/v\/([a-zA-Z0-9_-]{11})/
     ];
-    
+
     for (let pattern of patterns) {
         const match = url.match(pattern);
         if (match) return match[1];
@@ -71,7 +71,7 @@ function sanitizeFilename(filename) {
 
 // Get format string for yt-dlp based on user selection
 function getFormatString(format) {
-    switch(format) {
+    switch (format) {
         case '1080p':
             // Download best video up to 1080p and best audio, then merge
             // Always merge video and audio into mp4
@@ -161,15 +161,15 @@ app.post('/api/download', async (req, res) => {
             // command = `yt-dlp -f "${formatString}" --merge-output-format mp4 --ffmpeg-location "${ffmpegPath}" -o "${outputTemplate}" "${url}"`;
             command = `yt-dlp -f "${formatString}" --merge-output-format mp4 -o "${outputTemplate}" "${url}"`;
             expectedExtension = 'mp4';
-        // Check if ffmpeg is installed
-        app.get('/api/check-ffmpeg', async (req, res) => {
-            try {
-                const { stdout } = await execAsync('ffmpeg -version');
-                res.json({ installed: true, version: stdout.split('\n')[0] });
-            } catch (error) {
-                res.json({ installed: false, error: 'ffmpeg is not installed' });
-            }
-        });
+            // Check if ffmpeg is installed
+            app.get('/api/check-ffmpeg', async (req, res) => {
+                try {
+                    const { stdout } = await execAsync('ffmpeg -version');
+                    res.json({ installed: true, version: stdout.split('\n')[0] });
+                } catch (error) {
+                    res.json({ installed: false, error: 'ffmpeg is not installed' });
+                }
+            });
         }
 
         console.log('Executing command:', command);
@@ -182,7 +182,7 @@ app.post('/api/download', async (req, res) => {
 
         // Find the downloaded file - look for the expected extension
         const files = fs.readdirSync(DOWNLOADS_DIR);
-        const downloadedFile = files.find(file => 
+        const downloadedFile = files.find(file =>
             file.startsWith(`${videoId}_${timestamp}`) && file.endsWith(`.${expectedExtension}`)
         );
 
@@ -193,14 +193,14 @@ app.post('/api/download', async (req, res) => {
 
         const filePath = path.join(DOWNLOADS_DIR, downloadedFile);
         console.log('Sending file:', filePath);
-        
+
         // Set proper headers
         res.setHeader('Content-Disposition', `attachment; filename="${downloadedFile}"`);
         res.setHeader('Content-Type', 'application/octet-stream');
-        
+
         // Send file to client
         const fileStream = fs.createReadStream(filePath);
-        
+
         fileStream.on('error', (err) => {
             console.error('Stream error:', err);
             if (!res.headersSent) {
@@ -224,9 +224,9 @@ app.post('/api/download', async (req, res) => {
     } catch (error) {
         console.error('Error downloading video:', error);
         if (!res.headersSent) {
-            res.status(500).json({ 
+            res.status(500).json({
                 error: 'Failed to download video',
-                details: error.message 
+                details: error.message
             });
         }
     }
@@ -241,23 +241,25 @@ app.get('/api/health', (req, res) => {
 app.get('/api/check-ytdlp', async (req, res) => {
     try {
         const { stdout } = await execAsync('yt-dlp --version');
-        res.json({ 
-            installed: true, 
-            version: stdout.trim() 
+        res.json({
+            installed: true,
+            version: stdout.trim()
         });
     } catch (error) {
-        res.json({ 
-            installed: false, 
-            error: 'yt-dlp is not installed' 
+        res.json({
+            installed: false,
+            error: 'yt-dlp is not installed'
         });
     }
 });
 
 // Start server
-app.listen(PORT, () => {
+// app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
+
     console.log(`YouTube Downloader API running on http://localhost:${PORT}`);
     console.log('Make sure yt-dlp is installed: pip install yt-dlp');
-    
+
     // Check if yt-dlp is available
     exec('yt-dlp --version', (error) => {
         if (error) {
