@@ -156,8 +156,10 @@ app.post('/api/download', async (req, res) => {
             // For video formats (1080p, 720p) - merge video and audio
             const formatString = getFormatString(format);
             // Force ffmpeg merging with absolute path
-            const ffmpegPath = 'C:\\Users\\Dell 5330\\Downloads\\ffmpeg-master-latest-win64-gpl-shared\\ffmpeg-master-latest-win64-gpl-shared\\bin\\ffmpeg.exe';
-            command = `yt-dlp -f "${formatString}" --merge-output-format mp4 --ffmpeg-location "${ffmpegPath}" -o "${outputTemplate}" "${url}"`;
+            // const ffmpegPath = 'C:\\Users\\Dell 5330\\Downloads\\ffmpeg-master-latest-win64-gpl-shared\\ffmpeg-master-latest-win64-gpl-shared\\bin\\ffmpeg.exe';
+            //yt-dlp -f "${formatString}" --merge-output-format mp4 -o "${outputTemplate}" "${url}"
+            // command = `yt-dlp -f "${formatString}" --merge-output-format mp4 --ffmpeg-location "${ffmpegPath}" -o "${outputTemplate}" "${url}"`;
+            command = `yt-dlp -f "${formatString}" --merge-output-format mp4 -o "${outputTemplate}" "${url}"`;
             expectedExtension = 'mp4';
         // Check if ffmpeg is installed
         app.get('/api/check-ffmpeg', async (req, res) => {
