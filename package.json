@@ -1,0 +1,26 @@
+{
+  "name": "youtube-downloader-backend",
+  "version": "1.0.0",
+  "description": "Backend API for YouTube video downloader",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "keywords": [
+    "youtube",
+    "downloader",
+    "video",
+    "mp3",
+    "yt-dlp"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^4.22.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
