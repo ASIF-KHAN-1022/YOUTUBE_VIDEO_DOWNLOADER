@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public')); // Serve frontend files
+app.use(express.static('public'));
 
 // Create downloads directory if it doesn't exist
 const DOWNLOADS_DIR = path.join(__dirname, 'downloads');
@@ -36,108 +36,131 @@ function cleanupOldFiles() {
     });
 }
 
-// Run cleanup every 30 minutes
 setInterval(cleanupOldFiles, 30 * 60 * 1000);
 
-// Validate YouTube URL
-function isValidYouTubeUrl(url) {
-    const patterns = [
-        /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
-        /^(https?:\/\/)?(www\.)?youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
-        /^(https?:\/\/)?(www\.)?youtube\.com\/v\/([a-zA-Z0-9_-]{11})/
-    ];
-    return patterns.some(pattern => pattern.test(url));
-}
+// ─── Platform Detection ───────────────────────────────────────────────────────
 
-// Extract video ID from URL
-function extractVideoId(url) {
-    const patterns = [
-        /(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
-        /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
-        /youtube\.com\/v\/([a-zA-Z0-9_-]{11})/
-    ];
-
-    for (let pattern of patterns) {
-        const match = url.match(pattern);
-        if (match) return match[1];
-    }
+function detectPlatform(url) {
+    if (/youtube\.com\/shorts\//.test(url)) return 'youtube_shorts';
+    if (/youtube\.com\/watch|youtu\.be\//.test(url)) return 'youtube';
+    if (/instagram\.com\/(reel|p|tv)\//.test(url)) return 'instagram';
+    if (/tiktok\.com\//.test(url)) return 'tiktok';
     return null;
 }
 
-// Sanitize filename
-function sanitizeFilename(filename) {
-    return filename.replace(/[^a-z0-9_\-\.]/gi, '_');
+function isValidUrl(url) {
+    return detectPlatform(url) !== null;
 }
 
-// Get format string for yt-dlp based on user selection
-function getFormatString(format) {
+function extractId(url, platform) {
+    switch (platform) {
+        case 'youtube':
+        case 'youtube_shorts': {
+            const match = url.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+            return match ? match[1] : `yt_${Date.now()}`;
+        }
+        case 'instagram': {
+            const match = url.match(/instagram\.com\/(?:reel|p|tv)\/([A-Za-z0-9_-]+)/);
+            return match ? match[1] : `ig_${Date.now()}`;
+        }
+        case 'tiktok': {
+            const match = url.match(/tiktok\.com\/.*\/video\/(\d+)/);
+            return match ? match[1] : `tt_${Date.now()}`;
+        }
+        default:
+            return `dl_${Date.now()}`;
+    }
+}
+
+// ─── Format String ────────────────────────────────────────────────────────────
+
+function getFormatString(format, platform) {
+    // Instagram and TikTok: always best quality
+    if (platform === 'instagram' || platform === 'tiktok') {
+        if (format === 'mp3') return 'bestaudio';
+        return 'best[ext=mp4]/best';
+    }
+
+    // YouTube / Shorts
     switch (format) {
         case '1080p':
-            // Download best video up to 1080p and best audio, then merge
-            // Always merge video and audio into mp4
             return 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]';
         case '720p':
-            // Download best video up to 720p and best audio, then merge
-            // Always merge video and audio into mp4
             return 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]';
         case 'mp3':
             return 'bestaudio[ext=m4a]/bestaudio';
-        case 'no-audio':
-            return 'bestvideo[ext=mp4]/bestvideo';
         default:
             return 'best[ext=mp4]/best';
     }
 }
 
-// API endpoint to get video info
+// ─── API: Detect Platform ─────────────────────────────────────────────────────
+
+app.post('/api/detect-platform', (req, res) => {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL is required' });
+
+    const platform = detectPlatform(url);
+    if (!platform) return res.status(400).json({ error: 'Unsupported URL' });
+
+    const labels = {
+        youtube: 'YouTube',
+        youtube_shorts: 'YouTube Shorts',
+        instagram: 'Instagram',
+        tiktok: 'TikTok'
+    };
+
+    res.json({ platform, label: labels[platform] });
+});
+
+// ─── API: Video Info ──────────────────────────────────────────────────────────
+
 app.post('/api/video-info', async (req, res) => {
     try {
         const { url } = req.body;
-
-        if (!url || !isValidYouTubeUrl(url)) {
-            return res.status(400).json({ error: 'Invalid YouTube URL' });
+        if (!url || !isValidUrl(url)) {
+            return res.status(400).json({ error: 'Invalid or unsupported URL' });
         }
 
-        // Get video info using yt-dlp
         const command = `yt-dlp --dump-json "${url}"`;
-        const { stdout } = await execAsync(command);
+        const { stdout } = await execAsync(command, { timeout: 30000 });
         const videoInfo = JSON.parse(stdout);
 
         res.json({
-            title: videoInfo.title,
-            duration: videoInfo.duration,
-            thumbnail: videoInfo.thumbnail,
-            uploader: videoInfo.uploader,
-            view_count: videoInfo.view_count
+            title: videoInfo.title || 'Unknown Title',
+            duration: videoInfo.duration || 0,
+            thumbnail: videoInfo.thumbnail || '',
+            uploader: videoInfo.uploader || videoInfo.channel || 'Unknown',
+            view_count: videoInfo.view_count || 0,
+            platform: detectPlatform(url)
         });
-
     } catch (error) {
         console.error('Error fetching video info:', error);
         res.status(500).json({ error: 'Failed to fetch video information' });
     }
 });
 
-// API endpoint to download video with progress tracking
+// ─── API: Download ────────────────────────────────────────────────────────────
+
 app.post('/api/download', async (req, res) => {
     try {
         const { url, format } = req.body;
 
-        if (!url || !isValidYouTubeUrl(url)) {
-            return res.status(400).json({ error: 'Invalid YouTube URL' });
+        if (!url || !isValidUrl(url)) {
+            return res.status(400).json({ error: 'Invalid or unsupported URL' });
         }
-
         if (!format) {
             return res.status(400).json({ error: 'Format is required' });
         }
 
-        const videoId = extractVideoId(url);
+        const platform = detectPlatform(url);
+        const videoId = extractId(url, platform);
         const timestamp = Date.now();
         const outputTemplate = path.join(DOWNLOADS_DIR, `${videoId}_${timestamp}.%(ext)s`);
 
         let command;
         let expectedExtension;
 
-        // Handle different format types
         if (format === 'thumbnail') {
             command = `yt-dlp --write-thumbnail --skip-download --convert-thumbnails jpg -o "${outputTemplate}" "${url}"`;
             expectedExtension = 'jpg';
@@ -145,60 +168,37 @@ app.post('/api/download', async (req, res) => {
             command = `yt-dlp --write-auto-sub --sub-lang en --skip-download --convert-subs srt -o "${outputTemplate}" "${url}"`;
             expectedExtension = 'srt';
         } else if (format === 'mp3') {
-            // For MP3, download best audio and convert
             command = `yt-dlp -f "bestaudio" -x --audio-format mp3 --audio-quality 0 -o "${outputTemplate}" "${url}"`;
             expectedExtension = 'mp3';
-        } else if (format === 'no-audio') {
-            // Video only, no audio
-            command = `yt-dlp -f "bestvideo[ext=mp4]" -o "${outputTemplate}" "${url}"`;
-            expectedExtension = 'mp4';
         } else {
-            // For video formats (1080p, 720p) - merge video and audio
-            const formatString = getFormatString(format);
-            // Force ffmpeg merging with absolute path
-            // const ffmpegPath = 'C:\\Users\\Dell 5330\\Downloads\\ffmpeg-master-latest-win64-gpl-shared\\ffmpeg-master-latest-win64-gpl-shared\\bin\\ffmpeg.exe';
-            //yt-dlp -f "${formatString}" --merge-output-format mp4 -o "${outputTemplate}" "${url}"
-            // command = `yt-dlp -f "${formatString}" --merge-output-format mp4 --ffmpeg-location "${ffmpegPath}" -o "${outputTemplate}" "${url}"`;
+            // Video formats (1080p, 720p, best)
+            const formatString = getFormatString(format, platform);
             command = `yt-dlp -f "${formatString}" --merge-output-format mp4 -o "${outputTemplate}" "${url}"`;
             expectedExtension = 'mp4';
-            // Check if ffmpeg is installed
-            app.get('/api/check-ffmpeg', async (req, res) => {
-                try {
-                    const { stdout } = await execAsync('ffmpeg -version');
-                    res.json({ installed: true, version: stdout.split('\n')[0] });
-                } catch (error) {
-                    res.json({ installed: false, error: 'ffmpeg is not installed' });
-                }
-            });
         }
 
-        console.log('Executing command:', command);
+        console.log(`[${platform}] Executing:`, command);
+        await execAsync(command, { maxBuffer: 1024 * 1024 * 200, timeout: 300000 });
 
-        // Execute yt-dlp command
-        await execAsync(command, { maxBuffer: 1024 * 1024 * 200 }); // Increased buffer to 200MB
-
-        // Wait a moment for file system to sync
+        // Wait for filesystem sync
         await new Promise(resolve => setTimeout(resolve, 500));
 
-        // Find the downloaded file - look for the expected extension
         const files = fs.readdirSync(DOWNLOADS_DIR);
         const downloadedFile = files.find(file =>
             file.startsWith(`${videoId}_${timestamp}`) && file.endsWith(`.${expectedExtension}`)
         );
 
         if (!downloadedFile) {
-            console.error('Downloaded files:', files.filter(f => f.startsWith(`${videoId}_${timestamp}`)));
+            console.error('Expected file not found. Files:', files.filter(f => f.startsWith(`${videoId}_${timestamp}`)));
             return res.status(500).json({ error: 'File download failed - file not found' });
         }
 
         const filePath = path.join(DOWNLOADS_DIR, downloadedFile);
         console.log('Sending file:', filePath);
 
-        // Set proper headers
         res.setHeader('Content-Disposition', `attachment; filename="${downloadedFile}"`);
         res.setHeader('Content-Type', 'application/octet-stream');
 
-        // Send file to client
         const fileStream = fs.createReadStream(filePath);
 
         fileStream.on('error', (err) => {
@@ -210,19 +210,18 @@ app.post('/api/download', async (req, res) => {
 
         fileStream.on('end', () => {
             console.log('File sent successfully:', downloadedFile);
-            // Delete file after 30 seconds (gives time for download to complete)
             setTimeout(() => {
                 if (fs.existsSync(filePath)) {
                     fs.unlinkSync(filePath);
-                    console.log(`Cleaned up file: ${downloadedFile}`);
+                    console.log(`Cleaned up: ${downloadedFile}`);
                 }
-            }, 30000); // 30 seconds
+            }, 30000);
         });
 
         fileStream.pipe(res);
 
     } catch (error) {
-        console.error('Error downloading video:', error);
+        console.error('Download error:', error);
         if (!res.headersSent) {
             res.status(500).json({
                 error: 'Failed to download video',
@@ -232,40 +231,49 @@ app.post('/api/download', async (req, res) => {
     }
 });
 
-// Health check endpoint
+// ─── Health & Diagnostics ─────────────────────────────────────────────────────
+
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', message: 'YouTube Downloader API is running' });
+    res.json({ status: 'ok', message: 'Multi-Platform Downloader API is running' });
 });
 
-// Check if yt-dlp is installed
 app.get('/api/check-ytdlp', async (req, res) => {
     try {
         const { stdout } = await execAsync('yt-dlp --version');
-        res.json({
-            installed: true,
-            version: stdout.trim()
-        });
-    } catch (error) {
-        res.json({
-            installed: false,
-            error: 'yt-dlp is not installed'
-        });
+        res.json({ installed: true, version: stdout.trim() });
+    } catch {
+        res.json({ installed: false, error: 'yt-dlp is not installed' });
     }
 });
 
-// Start server
-// app.listen(PORT, () => {
-app.listen(PORT, "0.0.0.0", () => {
+app.get('/api/check-ffmpeg', async (req, res) => {
+    try {
+        const { stdout } = await execAsync('ffmpeg -version');
+        res.json({ installed: true, version: stdout.split('\n')[0] });
+    } catch {
+        res.json({ installed: false, error: 'ffmpeg is not installed' });
+    }
+});
 
-    console.log(`YouTube Downloader API running on http://localhost:${PORT}`);
-    console.log('Make sure yt-dlp is installed: pip install yt-dlp');
+// ─── Start Server ─────────────────────────────────────────────────────────────
 
-    // Check if yt-dlp is available
-    exec('yt-dlp --version', (error) => {
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Multi-Platform Downloader running on http://localhost:${PORT}`);
+    console.log('Supported: YouTube, YouTube Shorts, Instagram Reels, TikTok');
+
+    exec('yt-dlp --version', (error, stdout) => {
         if (error) {
-            console.warn('⚠️  Warning: yt-dlp not found! Install it with: pip install yt-dlp');
+            console.warn('⚠️  yt-dlp not found! Install: pip install yt-dlp');
         } else {
-            console.log('✓ yt-dlp is installed and ready');
+            console.log(`✓ yt-dlp ${stdout.trim()} ready`);
+        }
+    });
+
+    exec('ffmpeg -version', (error) => {
+        if (error) {
+            console.warn('⚠️  ffmpeg not found! Install ffmpeg for video merging.');
+        } else {
+            console.log('✓ ffmpeg ready');
         }
     });
 });
