@@ -10,7 +10,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ─── Admin Password (change this!) ───────────────────────────────────────────
-const ADMIN_PASSWORD = 'admin1234';
+const ADMIN_PASSWORD = 'Ali$230609';
 
 // Middleware
 app.use(cors());
