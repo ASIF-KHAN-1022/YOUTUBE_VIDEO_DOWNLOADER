@@ -10,7 +10,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ─── Admin Password (change this!) ───────────────────────────────────────────
-const ADMIN_PASSWORD = 'Ali$230609';
+const ADMIN_PASSWORD = 'admin1234';
 
 // Middleware
 app.use(cors());
@@ -95,27 +95,36 @@ function getClientIP(req) {
 }
 
 function writeLog(entry) {
-    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-    const line = `[${timestamp}] ${entry}\n`;
-    fs.appendFileSync(getLogFilePath(), line, 'utf8');
-    console.log(line.trim());
+    try {
+        const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+        const line = `[${timestamp}] ${entry}\n`;
+        if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
+        fs.appendFileSync(getLogFilePath(), line, 'utf8');
+        console.log(line.trim());
+    } catch (err) {
+        console.error('Log write failed (non-fatal):', err.message);
+    }
 }
 
 function logActivity(req, event, data = {}) {
-    const ip      = getClientIP(req);
-    const ua      = req.headers['user-agent'] || '';
-    const { browser, os, device } = parseUserAgent(ua);
+    try {
+        const ip      = getClientIP(req);
+        const ua      = req.headers['user-agent'] || '';
+        const { browser, os, device } = parseUserAgent(ua);
 
-    const parts = [
-        `EVENT=${event}`,
-        `IP=${ip}`,
-        `DEVICE=${device}`,
-        `OS=${os}`,
-        `BROWSER=${browser}`,
-        ...Object.entries(data).map(([k, v]) => `${k.toUpperCase()}=${v}`)
-    ];
+        const parts = [
+            `EVENT=${event}`,
+            `IP=${ip}`,
+            `DEVICE=${device}`,
+            `OS=${os}`,
+            `BROWSER=${browser}`,
+            ...Object.entries(data).map(([k, v]) => `${k.toUpperCase()}=${String(v).replace(/[\n\r]/g, ' ')}`)
+        ];
 
-    writeLog(parts.join(' | '));
+        writeLog(parts.join(' | '));
+    } catch (err) {
+        console.error('logActivity failed (non-fatal):', err.message);
+    }
 }
 
 // Clean up old files (older than 1 hour)
